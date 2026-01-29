@@ -1,119 +1,101 @@
 -- ======================
--- AUTO GRAB GUN + VERIFICAR INVENTARIO/CHARACTER
+-- AUTO GRAB GUN SUAVE Y FLUIDA CON TOGGLE
 -- ======================
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local GUN_NAME = "GunDrop"
+local MAX_DISTANCE = 1000
 local DISTANCE_ABOVE = 2
-local MAX_DISTANCE = 1000 -- radio máximo
+local MOVE_SPEED = 0.15 -- tiempo de tween rápido y suave
 
--- ======================
--- TOGGLE GLOBAL
--- ======================
-if _G.AutoGrabGun == nil then
-    _G.AutoGrabGun = true
-else
-    _G.AutoGrabGun = not _G.AutoGrabGun
+-- Toggle global
+if _G.AutoGrabGunActive == nil then
+    _G.AutoGrabGunActive = false
 end
 
--- ======================
--- VARIABLES GLOBALES
--- ======================
-if _G.AutoGrabConnection then
-    _G.AutoGrabConnection:Disconnect()
-    _G.AutoGrabConnection = nil
+-- Si ya estaba activo, desactivar
+if _G.AutoGrabGunActive then
+    _G.AutoGrabGunActive = false
+    if _G._AutoGrabGunConnection then
+        _G._AutoGrabGunConnection:Disconnect()
+        _G._AutoGrabGunConnection = nil
+    end
+    print("❌ Auto Grab Gun desactivado")
+    return
 end
 
-local grabbed = false
-local gunOrigin = nil
+-- Activar
+_G.AutoGrabGunActive = true
+print("✅ Auto Grab Gun activado")
 
--- ======================
--- FUNCIONES
--- ======================
+local gunDetected = nil
+local angle = 0
 
--- Revisa si tenemos alguna herramienta (Knife, Gun, Pistol)
-local function HasWeapon()
+-- Función para revisar si somos Murderer
+local function isMurderer()
     local char = LocalPlayer.Character
     local backpack = LocalPlayer:FindFirstChild("Backpack")
-
-    -- Revisar tools en Character
     if char then
         for _, t in ipairs(char:GetChildren()) do
-            if t:IsA("Tool") then
-                return true
-            end
+            if t:IsA("Tool") and t.Name == "Knife" then return true end
         end
     end
-
-    -- Revisar tools en Backpack
     if backpack then
         for _, t in ipairs(backpack:GetChildren()) do
-            if t:IsA("Tool") then
-                return true
-            end
+            if t:IsA("Tool") and t.Name == "Knife" then return true end
         end
     end
-
     return false
 end
 
--- Función para agarrar la Gun
-local function GrabGun()
-    if HasWeapon() then return end -- no teletransportar si tenemos herramienta
+-- Función para comprobar distancia
+local function inRange(obj)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return false end
+    return (obj.Position - char.HumanoidRootPart.Position).Magnitude <= MAX_DISTANCE
+end
+
+-- Loop principal
+_G._AutoGrabGunConnection = RunService.RenderStepped:Connect(function(delta)
+    if not _G.AutoGrabGunActive then return end
+    if isMurderer() then return end
 
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
     local hrp = char.HumanoidRootPart
 
+    -- Buscar GunDrop
+    local gun = nil
     for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj.Name == GUN_NAME and obj:IsA("BasePart") and not grabbed then
-            local distance = (obj.Position - hrp.Position).Magnitude
-            if distance <= MAX_DISTANCE then
-                grabbed = true
-                gunOrigin = hrp.CFrame
-
-                -- Teleport hacia la Gun
-                local tween = TweenService:Create(
-                    hrp,
-                    TweenInfo.new(0.25),
-                    {CFrame = obj.CFrame + Vector3.new(0,DISTANCE_ABOVE,0)}
-                )
-                tween:Play()
-
-                -- Esperar a que la Gun desaparezca y volver
-                obj.AncestryChanged:Connect(function(_, parent)
-                    if not parent then
-                        local backTween = TweenService:Create(hrp, TweenInfo.new(0.25), {CFrame = gunOrigin})
-                        backTween:Play()
-                        grabbed = false
-                    end
-                end)
-            end
+        if obj.Name == GUN_NAME and inRange(obj) then
+            gun = obj
+            break
         end
     end
-end
 
--- ======================
--- DESACTIVAR SI TOGGLE OFF
--- ======================
-if not _G.AutoGrabGun then
-    grabbed = false
-    warn("❌ AUTO GRAB GUN DESACTIVADO")
-    return
-end
+    if gun then
+        gunDetected = gun
 
-warn("✅ AUTO GRAB GUN ACTIVADO")
+        -- Movimiento circular + arriba/abajo suave
+        angle = angle + delta * 2
+        local xOffset = math.cos(angle) * 1
+        local zOffset = math.sin(angle) * 1
+        local yOffset = DISTANCE_ABOVE + math.sin(angle*2)*0.5
 
--- ======================
--- LOOP PRINCIPAL
--- ======================
-_G.AutoGrabConnection = RunService.RenderStepped:Connect(function()
-    if _G.AutoGrabGun then
-        pcall(GrabGun)
+        local targetCFrame = CFrame.new(hrp.Position + Vector3.new(xOffset, yOffset, zOffset))
+
+        local tween = TweenService:Create(
+            gun,
+            TweenInfo.new(MOVE_SPEED, Enum.EasingStyle.Linear),
+            {CFrame = targetCFrame}
+        )
+        tween:Play()
+    elseif gunDetected then
+        gunDetected = nil
     end
 end)
